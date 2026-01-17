@@ -1,5 +1,12 @@
 const express = require("express");
 const cors = require("cors");
+const mongoose = require("mongoose");
+
+mongoose.connect("mongodb://localhost:27017/collabcode");
+
+mongoose.connection.once("open", () => {
+  console.log("🗄️ MongoDB connected");
+});
 
 const authRoutes = require("./auth/auth.controller");
 const roomRoutes = require("./rooms/room.controller");
