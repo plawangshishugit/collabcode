@@ -231,3 +231,206 @@ This ensures:
 * Infinite loops are avoided
 
 ---
+
+## 7️⃣ Stage 3 – Real-Time Cursor Tracking & User Presence
+
+### Objective
+
+Enhance collaboration realism by allowing users to:
+
+* See **other users’ cursors** in real time
+* Observe **live presence** inside a room
+* Experience behavior similar to Google Docs / VS Code Live Share
+
+This stage focuses on **ephemeral collaboration signals**, not persistent data.
+
+---
+
+## 7.1 Cursor Tracking Design
+
+Cursor position is **not application state**.
+It is **transient, high-frequency, and non-persistent**.
+
+Therefore:
+
+* Cursor data is **never stored**
+* Cursor updates are **broadcast-only**
+* Cursor events are **throttled** for performance
+
+---
+
+### Cursor Event Flow
+
+```
+User moves cursor
+ → Monaco emits cursor event
+ → Throttled client event fires
+ → Emit "cursor:move" via WebSocket
+ → Server broadcasts to room
+ → Other clients render remote cursor
+```
+
+---
+
+### Cursor Events Used
+
+| Event Name      | Direction       | Purpose                          |
+| --------------- | --------------- | -------------------------------- |
+| `cursor:move`   | Client → Server | Send cursor position             |
+| `cursor:update` | Server → Client | Broadcast remote cursor movement |
+
+---
+
+### Why Throttling Is Required
+
+Cursor movement can generate **dozens of events per second**.
+
+Without throttling:
+
+* Network flooding occurs
+* UI becomes jittery
+* Backend load spikes
+
+Solution:
+
+* Cursor events are throttled to ~20 updates/sec
+* Ensures smooth UX with minimal overhead
+
+---
+
+### Rendering Remote Cursors
+
+Remote cursors are rendered using **Monaco editor decorations**.
+
+Key characteristics:
+
+* Purely visual
+* No impact on document content
+* Automatically cleaned up on disconnect
+
+---
+
+## 7.2 User Presence Model
+
+Presence is derived implicitly from WebSocket connections.
+
+A user is considered:
+
+* **Present** → when socket joins a room
+* **Absent** → when socket disconnects
+
+No database writes are required.
+
+---
+
+### Presence Events
+
+| Event Name    | Purpose                  |
+| ------------- | ------------------------ |
+| `user:joined` | Notify room of new user  |
+| `user:left`   | Notify room of departure |
+
+---
+
+### Design Principle
+
+Presence is:
+
+* **Eventually consistent**
+* **Session-scoped**
+* **Derived, not stored**
+
+This keeps the system:
+
+* Simple
+* Scalable
+* Fault-tolerant
+
+---
+
+## 8️⃣ Known Limitation After Stage 3 (Important)
+
+At this stage, users may observe the following behavior:
+
+> When multiple users type **simultaneously**, editor contents may diverge.
+
+### Why This Happens
+
+The current implementation uses **state-based synchronization**.
+
+Each update sends the **entire document**:
+
+```
+Client A → "Here is my full document"
+Client B → "Here is my full document"
+```
+
+When edits occur concurrently:
+
+* Last-arriving update overwrites the other
+* Clients may temporarily diverge
+* Cursor sync still works correctly
+
+This behavior is **expected and correct** for this stage.
+
+---
+
+### Why This Is Not a Bug
+
+This stage intentionally prioritizes:
+
+* Simplicity
+* Clear event flow
+* Learning boundaries of naive synchronization
+
+The limitation clearly exposes the need for a more advanced approach.
+
+---
+
+## 9️⃣ Transition to Stage 4 – Why CRDTs Are Required
+
+To achieve **true collaborative editing**, the system must:
+
+* Merge concurrent edits deterministically
+* Avoid overwriting user input
+* Remain correct under network latency
+* Support offline or delayed updates
+
+This requires moving from:
+
+```
+State-based sync ❌
+```
+
+to:
+
+```
+Operation-based sync ✅
+```
+
+---
+
+### Solution: CRDT (Conflict-Free Replicated Data Types)
+
+In Stage 4, the system will integrate **CRDTs (via Yjs)**.
+
+Key advantages:
+
+* No central locking
+* Automatic conflict resolution
+* Eventual consistency
+* Proven in tools like Google Docs and Figma
+
+---
+
+## 10️⃣ System Evolution Summary
+
+| Stage | Capability Added                        |
+| ----- | --------------------------------------- |
+| 0     | WebSocket foundation                    |
+| 1     | Authentication + room isolation         |
+| 2     | Real-time code synchronization (MVP)    |
+| 3     | Cursor tracking + user presence         |
+| 4     | CRDT-based conflict-free editing (next) |
+
+---

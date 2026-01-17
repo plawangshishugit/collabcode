@@ -24,3 +24,7 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+.remote-cursor {
+  border-left: 2px solid red;
+  margin-left: -1px;
+}
