@@ -1,22 +1,3 @@
-Absolutely 👍
-This is a **very smart move** — documenting now will help you **learn deeply** *and* **explain confidently in interviews**.
-
-Below is a **clean, professional Stage 0–Stage 2 documentation** that you can:
-
-* Put directly into your **README.md**
-* Use as **oral explanation** in interviews
-* Use as a **mental map** of how the system works
-
-I’ll write it in **clear engineering language**, not tutorial language.
-
----
-
-# 📘 CollabCode – Stage 0 to Stage 2 Documentation
-
-**Real-Time Collaborative Code Editor (MVP)**
-
----
-
 ## 1️⃣ Project Overview
 
 **CollabCode** is a web-based real-time collaborative code editor where multiple users can join a shared session (room) and edit code together.
