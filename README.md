@@ -415,3 +415,108 @@ Key advantages:
 | 4     | CRDT-based conflict-free editing (next) |
 
 ---
+# 📦 Stage 3 (Refactored) – Modular Real-Time Collaboration Architecture
+
+## Objective
+
+As real-time features increased (code sync, cursor tracking, presence), the room page began accumulating multiple responsibilities.
+
+To maintain:
+
+* readability
+* scalability
+* ease of future CRDT integration
+
+the room editor was **refactored into composable hooks**, following modern React and system-design best practices.
+
+---
+
+## Why Modularization Was Necessary
+
+Before refactoring, the room page handled:
+
+* WebSocket connection lifecycle
+* Room join logic
+* Code synchronization
+* Cursor tracking
+* Monaco editor lifecycle
+
+This violated the **Single Responsibility Principle** and made future extensions risky.
+
+---
+
+## Refactored Frontend Structure
+
+```
+apps/web/app/room/[roomId]/
+├── page.tsx              # UI composition only
+├── useRoomSocket.ts      # Socket.IO singleton
+├── useCodeSync.ts        # Stage-3 code synchronization
+├── useCursorTracking.ts  # Cursor presence & rendering
+```
+
+Each module now owns **exactly one responsibility**.
+
+---
+
+## Module Responsibilities
+
+### 1️⃣ `useRoomSocket.ts` – WebSocket Singleton
+
+**Responsibility**
+
+* Create and manage a single Socket.IO connection
+* Prevent duplicate socket instances across renders
+
+**Design Principle**
+
+* Shared infrastructure belongs in a singleton
+* Business logic should not manage socket lifecycle
+
+---
+
+### 2️⃣ `useCodeSync.ts` – Real-Time Code Synchronization (Stage 3)
+
+**Responsibility**
+
+* Maintain editor code state
+* Emit `code:change` events
+* Apply `code:update` broadcasts
+
+**Key Insight**
+This hook intentionally uses **state-based synchronization**, exposing the limitations of last-write-wins behavior under concurrency.
+
+> This design decision clearly motivates the transition to CRDTs in Stage 4.
+
+---
+
+### 3️⃣ `useCursorTracking.ts` – Cursor Presence
+
+**Responsibility**
+
+* Emit cursor movement events (throttled)
+* Render remote cursors using Monaco decorations
+* Handle ephemeral presence signals
+
+**Why Separate?**
+Cursor presence is:
+
+* high-frequency
+* non-persistent
+* visually scoped
+
+Separating it avoids coupling UI signals with document state.
+
+---
+
+### 4️⃣ `page.tsx` – Composition Layer
+
+**Responsibility**
+
+* Assemble hooks
+* Bind Monaco editor
+* Remain free of business logic
+
+The page now acts as a **thin orchestration layer**, improving readability and testability.
+
+---
