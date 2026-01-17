@@ -1,138 +1,85 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useState } from "react";
 import Editor from "@monaco-editor/react";
-import * as Y from "yjs";
-import { WebsocketProvider } from "y-websocket";
-import { MonacoBinding } from "y-monaco";
 import * as monaco from "monaco-editor";
+import { io } from "socket.io-client";
+
+import { useYjsProvider } from "./hooks/useYjsProvider";
+import { useMonacoBinding } from "./hooks/useMonacoBinding";
+import { useAwareness } from "./hooks/useAwareness";
+import { useSnapshots } from "./hooks/useSnapshots";
+
+const socket = io("http://localhost:4000");
 
 export default function EditorClient({ roomId }: { roomId: string }) {
-  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const [editor, setEditor] =
+    useState<monaco.editor.IStandaloneCodeEditor | null>(null);
 
-  const ydocRef = useRef<Y.Doc | null>(null);
-  const providerRef = useRef<WebsocketProvider | null>(null);
-  const ytextRef = useRef<Y.Text | null>(null);
+  // 🔑 CRDT lifecycle + restore API
+  const {
+    ydocRef,
+    providerRef,
+    ytextRef,
+    restoreFromSnapshot,
+  } = useYjsProvider(roomId);
 
-  // ✅ ADD THIS
-  const decorationsRef = useRef<string[]>([]);
-  
-  function randomColor() {
-    const colors = [
-      "#e6194b",
-      "#3cb44b",
-      "#ffe119",
-      "#4363d8",
-      "#f58231",
-      "#911eb4",
-      "#46f0f0",
-      "#f032e6",
-    ];
-    return colors[Math.floor(Math.random() * colors.length)];
-  }
+  // 🔗 Monaco <-> CRDT binding
+  useMonacoBinding(
+    editor,
+    ytextRef.current,
+    providerRef.current?.awareness
+  );
 
-  // 1️⃣ Create Yjs document + provider (DOES NOT depend on editor)
+  // 👤 Cursor + presence
+  useAwareness(editor, providerRef.current?.awareness);
+
+  // 📸 Local snapshot history + broadcast restore
+  const { restorePrevious } = useSnapshots(
+    ydocRef.current,
+    socket,
+    roomId
+  );
+
+  // 🔄 Apply shared restore from other users
   useEffect(() => {
-    const ydoc = new Y.Doc();
-    ydocRef.current = ydoc;
-
-    const provider = new WebsocketProvider(
-      "ws://localhost:1234",
-      roomId,
-      ydoc
-    );
-    providerRef.current = provider;
-
-    provider.on("status", (e: { status: "connected" | "disconnected" }) => {
-      console.log("PROVIDER STATUS:", e.status);
+    socket.on("crdt:restore", ({ snapshot }) => {
+      console.log("🔄 Received shared restore");
+      restoreFromSnapshot(new Uint8Array(snapshot));
     });
-
-    const ytext = ydoc.getText("monaco");
-    ytextRef.current = ytext;
-
-    const awareness = provider.awareness;
-
-    awareness.setLocalState({
-      user: {
-        name: `User-${Math.floor(Math.random() * 1000)}`,
-        color: randomColor(),
-      },
-    });
-    // Optional initial content
-    if (ytext.length === 0) {
-      ytext.insert(0, "// Start coding...\n");
-    }
 
     return () => {
-      provider.destroy();
-      ydoc.destroy();
+      socket.off("crdt:restore");
     };
-  }, [roomId]);
-
-  // 2️⃣ Bind Monaco editor when it mounts
-  function handleEditorMount(
-    editor: monaco.editor.IStandaloneCodeEditor,
-    monacoInstance: typeof monaco
-  ) {
-    editorRef.current = editor;
-
-    if (!ydocRef.current || !ytextRef.current || !providerRef.current) {
-      return;
-    }
-
-    // Bind CRDT text
-    new MonacoBinding(
-      ytextRef.current,
-      editor.getModel()!,
-      new Set([editor]),
-      providerRef.current.awareness
-    );
-
-    const awareness = providerRef.current.awareness;
-
-    // 🔴 1. Broadcast local cursor movement
-    editor.onDidChangeCursorPosition((e) => {
-      awareness.setLocalStateField("cursor", {
-        lineNumber: e.position.lineNumber,
-        column: e.position.column,
-      });
-    });
-
-    // 🔵 2. Render remote cursors
-    awareness.on("change", () => {
-      const states = Array.from(awareness.getStates().values());
-
-      const decorations = states.flatMap((state: any) => {
-        if (!state.cursor || !state.user) return [];
-
-        return [
-          {
-            range: new monacoInstance.Range(
-              state.cursor.lineNumber,
-              state.cursor.column,
-              state.cursor.lineNumber,
-              state.cursor.column
-            ),
-            options: {
-              className: "remote-cursor",
-            },
-          },
-        ];
-      });
-
-      decorationsRef.current = editor.deltaDecorations(
-        decorationsRef.current,
-        decorations
-      );
-    });
-  }
+  }, [restoreFromSnapshot]);
 
   return (
-    <Editor
-      height="100%"
-      language="javascript"
-      theme="vs-dark"
-      onMount={handleEditorMount}
-    />
+    <>
+      {/* 🔄 Shared Undo Button */}
+      <button
+        onClick={restorePrevious}
+        style={{
+          position: "absolute",
+          top: 10,
+          right: 10,
+          zIndex: 10,
+          padding: "6px 10px",
+          background: "#222",
+          color: "#fff",
+          borderRadius: "4px",
+          border: "1px solid #444",
+          cursor: "pointer",
+        }}
+      >
+        🔄 Shared Undo
+      </button>
+
+      <Editor
+        height="100%"
+        language="javascript"
+        theme="vs-dark"
+        onMount={(ed) => setEditor(ed)}
+      />
+    </>
   );
 }

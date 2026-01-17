@@ -1,13 +1,14 @@
 const Y = require("yjs");
 
-const docs = new Map(); // roomId -> Y.Doc
+const docs = new Map();
 
 function getYDoc(roomId) {
   if (!docs.has(roomId)) {
-    const doc = new Y.Doc();
-    docs.set(roomId, doc);
+    docs.set(roomId, new Y.Doc());
   }
   return docs.get(roomId);
 }
 
-module.exports = { getYDoc };
+module.exports = {
+  getYDoc,
+};
