@@ -1,48 +1,17 @@
-"use client";
+import dynamic from "next/dynamic";
 
-import { useRef } from "react";
-import { useParams } from "next/navigation";
-import Editor from "@monaco-editor/react";
-import type * as monaco from "monaco-editor";
+const EditorClient = dynamic(() => import("./EditorClient"), {
+  ssr: false,
+});
 
-import { useCodeSync } from "./useCodeSync";
-import { useCursorTracking } from "./useCursorTracking";
-
-export default function RoomPage() {
-  const { roomId } = useParams<{ roomId: string }>();
-
-  const editorRef =
-    useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-
-  const monacoRef = useRef<typeof monaco | null>(null);
-
-  const { code, onCodeChange } = useCodeSync(roomId);
-  const { bindCursorEvents } = useCursorTracking(
-    roomId,
-    editorRef,
-    monacoRef
-  );
-
-  function handleEditorMount(
-    editor: monaco.editor.IStandaloneCodeEditor,
-    monacoInstance: typeof monaco
-  ) {
-    editorRef.current = editor;
-    monacoRef.current = monacoInstance;
-
-    bindCursorEvents(editor);
-  }
-
+export default function RoomPage({
+  params,
+}: {
+  params: { roomId: string };
+}) {
   return (
     <main className="h-screen">
-      <Editor
-        height="100%"
-        language="javascript"
-        theme="vs-dark"
-        value={code}
-        onChange={onCodeChange}
-        onMount={handleEditorMount}
-      />
+      <EditorClient roomId={params.roomId} />
     </main>
   );
 }
