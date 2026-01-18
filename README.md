@@ -415,9 +415,7 @@ Key advantages:
 | 4     | CRDT-based conflict-free editing (next) |
 
 ---
-# 📦 Stage 3 (Refactored) – Modular Real-Time Collaboration Architecture
-
-## Objective
+## Stage 3 (Refactored) – Modular Real-Time Collaboration Architecture
 
 As real-time features increased (code sync, cursor tracking, presence), the room page began accumulating multiple responsibilities.
 
@@ -518,5 +516,224 @@ Separating it avoids coupling UI signals with document state.
 * Remain free of business logic
 
 The page now acts as a **thin orchestration layer**, improving readability and testability.
+
+---
+## Stage 4 – Transition to CRDT-Based Synchronization (Yjs)
+
+### Objective
+
+Stage 3 intentionally used **state-based synchronization**, which exposed classic real-time collaboration problems:
+
+* last-write-wins overwrites
+* divergent document states
+* lack of true conflict resolution
+
+Stage 4 replaces this with **CRDT-based synchronization** using **Yjs**, enabling mathematically safe concurrent edits.
+
+---
+
+## Why CRDTs Were Necessary
+
+Traditional approaches (emit full text on change) fail under concurrency:
+
+```
+User A types "hello"
+User B types "world"
+→ One update overwrites the other
+```
+
+CRDTs solve this by ensuring:
+
+* commutative updates
+* eventual consistency
+* no central locking
+* deterministic convergence
+
+---
+
+## CRDT Architecture Overview
+
+```
+Editor (Monaco)
+   ↓
+Y.Text (CRDT)
+   ↓
+Encoded Updates (Uint8Array)
+   ↓
+Network Broadcast
+   ↓
+Other Clients
+```
+
+The **document state is never replaced**, only **merged**.
+
+---
+
+## Stage 5 – Awareness & Presence (Cursors, Users)
+
+### Objective
+
+Enable **real-time presence** without polluting document state.
+
+### Key Concepts
+
+* Awareness data is **ephemeral**
+* Presence ≠ document content
+* Cursor positions are not persisted
+
+---
+
+### Awareness Design
+
+* Powered by `y-protocols/awareness`
+* Each client publishes:
+
+  * user id
+  * cursor position
+  * color metadata
+* Other clients render cursors via Monaco decorations
+
+This separation ensures:
+
+* low bandwidth
+* no CRDT pollution
+* instant join/leave updates
+
+---
+
+## Stage 6 – Shared Time Travel (Global Undo / Restore)
+
+### Objective
+
+Enable **shared undo / restore** that affects **all participants**, not just one client.
+
+### Design Insight
+
+Local undo is insufficient in collaborative systems.
+
+Instead, the system restores a **previous CRDT snapshot**, ensuring:
+
+* all clients converge
+* no partial state rollback
+* consistent shared history
+
+---
+
+### Snapshot Strategy
+
+* Snapshots are captured as:
+
+  ```ts
+  Y.encodeStateAsUpdate(ydoc)
+  ```
+* Stored as binary updates
+* Restored using:
+
+  ```ts
+  Y.applyUpdate(ydoc, snapshot)
+  ```
+
+This preserves CRDT guarantees.
+
+---
+
+## Stage 7 – Persistent Version Storage (MongoDB Atlas)
+
+### Objective
+
+Ensure **durability** across:
+
+* page refresh
+* reconnects
+* server restarts
+* new users joining late
+
+---
+
+### Persistence Design
+
+* Snapshots stored as **binary blobs**
+* MongoDB Atlas used for:
+
+  * reliability
+  * production parity
+* Each snapshot is immutable and timestamped
+
+---
+
+### Database Schema
+
+```
+RoomSnapshot
+├── roomId (indexed)
+├── snapshot (Binary)
+└── createdAt (Date)
+```
+
+---
+
+### Restore-on-Join Flow
+
+```
+User joins room
+ → Server checks DB
+ → Latest snapshot loaded (if exists)
+ → CRDT state sent to client
+ → Client applies update
+```
+
+This guarantees **stateless servers with stateful rooms**.
+
+---
+
+## Stage 8 – Version History Sidebar UI
+
+### Objective
+
+Expose collaborative history to users in a **clear, intuitive UI**.
+
+---
+
+### UX Design
+
+* Sidebar lists:
+
+  * timestamped versions
+  * ordered newest → oldest
+* Each entry has a **Restore** action
+* Restore is **shared**, not local
+
+---
+
+### Separation of Concerns
+
+```
+hooks/useSnapshots.ts
+  ├─ snapshot capture
+  ├─ version metadata
+  └─ restore logic
+
+components/VersionHistory.tsx
+  └─ presentation only
+```
+
+The UI never touches CRDT internals.
+
+---
+
+### Why This Matters
+
+This feature demonstrates:
+
+* distributed systems thinking
+* real-time UX design
+* production-grade state management
+* collaborative safety guarantees
+
+It closely mirrors systems used in:
+
+* Google Docs
+* Figma
+* Notion
 
 ---
