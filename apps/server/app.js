@@ -1,13 +1,13 @@
+require("dotenv").config(); 
+
 const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 
-mongoose.connect(
-  "mongodb+srv://plawangshishu5029_db_user:9LOfqg2h1apgsElm@cluster0.sbba8lp.mongodb.net/collabcode?retryWrites=true&w=majority"
-);
+mongoose.connect(process.env.MONGODB_URI);
 
 mongoose.connection.once("open", () => {
-  console.log("🗄️ MongoDB connected (Atlas)");
+  console.log("🗄️ MongoDB connected (Atlas via .env)");
 });
 
 const authRoutes = require("./auth/auth.controller");
