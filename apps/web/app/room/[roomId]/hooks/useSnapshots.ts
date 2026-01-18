@@ -1,5 +1,10 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as Y from "yjs";
+
+type SnapshotMeta = {
+  index: number;
+  timestamp: number;
+};
 
 export function useSnapshots(
   ydoc: Y.Doc | null,
@@ -7,34 +12,44 @@ export function useSnapshots(
   roomId: string
 ) {
   const snapshotsRef = useRef<Uint8Array[]>([]);
+  const [versions, setVersions] = useState<SnapshotMeta[]>([]);
 
   useEffect(() => {
     if (!ydoc) return;
 
     let timer: NodeJS.Timeout;
 
-    const updateHandler = () => {
+    const onUpdate = () => {
       clearTimeout(timer);
 
       timer = setTimeout(() => {
-        snapshotsRef.current.push(Y.encodeStateAsUpdate(ydoc));
-        console.log("📸 Snapshot saved");
+        const snapshot = Y.encodeStateAsUpdate(ydoc);
+
+        snapshotsRef.current.push(snapshot);
+
+        setVersions((prev) => [
+          ...prev,
+          {
+            index: snapshotsRef.current.length - 1,
+            timestamp: Date.now(),
+          },
+        ]);
+
+        console.log("📸 Snapshot captured");
       }, 1000);
     };
 
-    ydoc.on("update", updateHandler);
+    ydoc.on("update", onUpdate);
 
     return () => {
-      ydoc.off("update", updateHandler);
+      ydoc.off("update", onUpdate);
       clearTimeout(timer);
     };
   }, [ydoc]);
 
-  function restorePrevious() {
-    if (snapshotsRef.current.length < 2) return;
-
-    const snapshot =
-      snapshotsRef.current[snapshotsRef.current.length - 2];
+  function restoreVersion(index: number) {
+    const snapshot = snapshotsRef.current[index];
+    if (!snapshot) return;
 
     socket.emit("crdt:restore", {
       roomId,
@@ -43,7 +58,7 @@ export function useSnapshots(
   }
 
   return {
-    snapshotsRef,
-    restorePrevious, //  ALWAYS PRESENT
+    versions,
+    restoreVersion,
   };
 }
