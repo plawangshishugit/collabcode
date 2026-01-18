@@ -720,20 +720,142 @@ components/VersionHistory.tsx
 The UI never touches CRDT internals.
 
 ---
+## Stage 9 – Stable User Identity & Cursor Presence
 
-### Why This Matters
+### Objective
 
-This feature demonstrates:
+Ensure **consistent collaboration experience** by making users:
 
-* distributed systems thinking
-* real-time UX design
-* production-grade state management
-* collaborative safety guarantees
+* identifiable across refreshes
+* visually distinguishable via cursor colors
+* stable across sessions (no random identity on reload)
 
-It closely mirrors systems used in:
+---
 
-* Google Docs
-* Figma
-* Notion
+### Identity Design
+
+* Identity stored **client-side** using `localStorage`
+* Each user has:
+
+  * `id` (UUID)
+  * `name`
+  * `color`
+* Identity is injected into **Yjs Awareness**
+
+This avoids premature backend coupling while remaining production-realistic.
+
+---
+
+### Awareness Data Model
+
+```
+awareness.state
+├── user
+│   ├── id
+│   ├── name
+│   └── color
+└── cursor
+    ├── lineNumber
+    └── column
+```
+
+---
+
+### Cursor Sync Flow
+
+```
+User moves cursor
+ → Monaco emits cursor event
+ → Awareness local state updated
+ → Awareness broadcast to peers
+ → Remote cursors rendered via Monaco decorations
+```
+
+---
+
+### Key Engineering Decisions
+
+* Awareness used for **ephemeral state only**
+* CRDT document remains **cursor-free**
+* Cursor rendering handled purely at UI layer
+
+This prevents CRDT pollution and keeps state minimal.
+
+---
+
+## Stage 10 – Session Analytics Dashboard
+
+### Objective
+
+Provide **observability** into collaborative sessions, enabling:
+
+* performance analysis
+* engagement metrics
+* interview-ready system insights
+
+---
+
+### Metrics Tracked
+
+| Metric        | Description                |
+| ------------- | -------------------------- |
+| Active Users  | Live count per room        |
+| Edits         | Text changes (throttled)   |
+| Restores      | Shared time-travel actions |
+| Snapshots     | Version captures           |
+| Session Start | Room lifetime              |
+
+---
+
+### Analytics Architecture
+
+```
+Client
+ ├─ emits analytics events
+ │   ├─ edit
+ │   ├─ snapshot
+ │   └─ restore
+ ↓
+Socket.IO Server
+ ├─ in-memory aggregation
+ ├─ per-room analytics state
+ ↓
+Client UI
+ └─ live analytics panel
+```
+
+---
+
+### Design Trade-offs
+
+* **In-memory aggregation** for low latency
+* Persistence optional (can be enabled later)
+* Throttled events to prevent socket flooding
+
+This design balances **accuracy, performance, and simplicity**.
+
+---
+
+### UI Composition
+
+```
+EditorClient
+├── Code Editor
+├── Version History Sidebar
+└── Analytics Panel
+```
+
+Each panel subscribes independently, avoiding tight coupling.
+
+---
+
+## Overall System Guarantees (So Far)
+
+✔ Real-time collaboration
+✔ Conflict-free editing (CRDT)
+✔ Shared time travel
+✔ Durable persistence (MongoDB Atlas)
+✔ Stable user identity
+✔ Live session analytics
 
 ---
