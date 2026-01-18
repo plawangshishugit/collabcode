@@ -22,7 +22,9 @@ export default function EditorClient({ roomId }: { roomId: string }) {
   useMonacoBinding(
     editor,
     ytextRef.current,
-    providerRef.current?.awareness
+    providerRef.current?.awareness,
+    socket,
+    roomId
   );
 
   useAwareness(editor, providerRef.current?.awareness);

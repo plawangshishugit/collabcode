@@ -13,6 +13,7 @@ export function useSnapshots(
 ) {
   const snapshotsRef = useRef<Uint8Array[]>([]);
   const [versions, setVersions] = useState<SnapshotMeta[]>([]);
+  const isRestoringRef = useRef(false);
 
   useEffect(() => {
     if (!ydoc) return;
@@ -20,6 +21,8 @@ export function useSnapshots(
     let timer: NodeJS.Timeout;
 
     const onUpdate = () => {
+      if (isRestoringRef.current) return;
+
       clearTimeout(timer);
 
       timer = setTimeout(() => {
@@ -35,6 +38,7 @@ export function useSnapshots(
           },
         ]);
 
+        socket.emit("snapshot:created", { roomId });
         console.log("📸 Snapshot captured");
       }, 1000);
     };
@@ -45,16 +49,22 @@ export function useSnapshots(
       ydoc.off("update", onUpdate);
       clearTimeout(timer);
     };
-  }, [ydoc]);
+  }, [ydoc, socket, roomId]);
 
   function restoreVersion(index: number) {
     const snapshot = snapshotsRef.current[index];
     if (!snapshot) return;
 
+    isRestoringRef.current = true;
+
     socket.emit("crdt:restore", {
       roomId,
       snapshot,
     });
+
+    setTimeout(() => {
+      isRestoringRef.current = false;
+    }, 500);
   }
 
   return {
