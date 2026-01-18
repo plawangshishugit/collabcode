@@ -11,6 +11,7 @@ export function useMonacoBinding(
   useEffect(() => {
     if (!editor || !ytext || !awareness) return;
 
+    // 1️⃣ Bind CRDT text <-> Monaco
     const binding = new MonacoBinding(
       ytext,
       editor.getModel()!,
@@ -18,8 +19,16 @@ export function useMonacoBinding(
       awareness
     );
 
+    // 2️⃣ Broadcast cursor position via awareness
+    const cursorListener = editor.onDidChangeCursorPosition(
+      (e: monaco.editor.ICursorPositionChangedEvent) => {
+        awareness.setLocalStateField("cursor", e.position);
+      }
+    );
+
     return () => {
-      binding.destroy?.();
+      cursorListener.dispose(); // cleanup cursor listener
+      binding.destroy?.();      // cleanup CRDT binding
     };
   }, [editor, ytext, awareness]);
 }
