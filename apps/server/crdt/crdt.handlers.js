@@ -1,45 +1,49 @@
 const Y = require("yjs");
 const { getYDoc } = require("./crdt.store");
+const RoomSnapshot = require("../models/RoomSnapshot");
 
 module.exports = function registerCrdtHandlers(io, socket) {
-  // Join room + send initial CRDT state
-  socket.on("room:join", ({ roomId }) => {
+  socket.on("room:join", async ({ roomId }) => {
     socket.join(roomId);
 
-    const doc = getYDoc(roomId);
+    const latest = await RoomSnapshot.findOne({ roomId })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    let doc;
+
+    if (latest) {
+      doc = new Y.Doc();
+      Y.applyUpdate(doc, new Uint8Array(latest.snapshot));
+      console.log("📦 Loaded snapshot from DB for room", roomId);
+    } else {
+      doc = getYDoc(roomId);
+    }
+
     const state = Y.encodeStateAsUpdate(doc);
-
     socket.emit("crdt:init", state);
-
-    console.log(`📄 ${socket.id} joined room ${roomId}`);
   });
 
-  // Receive incremental CRDT updates
   socket.on("crdt:update", ({ roomId, update }) => {
     const doc = getYDoc(roomId);
-
     Y.applyUpdate(doc, update);
-
     socket.to(roomId).emit("crdt:update", update);
   });
 
-  // 🔄 Shared Time Travel (NEW)
-  socket.on("crdt:restore", ({ roomId, snapshot }) => {
-    const doc = getYDoc(roomId);
+  socket.on("crdt:restore", async ({ roomId, snapshot }) => {
+    try {
+      console.log("💾 Saving snapshot to DB for room", roomId);
 
-    // Replace document state
-    doc.destroy();
+      await RoomSnapshot.create({
+        roomId,
+        snapshot: Buffer.from(snapshot),
+      });
 
-    const newDoc = new Y.Doc();
-    Y.applyUpdate(newDoc, new Uint8Array(snapshot));
+      socket.to(roomId).emit("crdt:restore", { snapshot });
 
-    // Overwrite store
-    const docsMap = require("./crdt.store");
-    docsMap.getYDoc(roomId); // ensures key exists
-    docsMap._docs?.set?.(roomId, newDoc); // optional internal ref
-
-    socket.to(roomId).emit("crdt:restore", { snapshot });
-
-    console.log(`🔄 Room ${roomId} restored to previous state`);
+      console.log("✅ Snapshot saved and broadcasted");
+    } catch (err) {
+      console.error("❌ Failed to save snapshot:", err);
+    }
   });
 };

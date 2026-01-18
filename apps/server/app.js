@@ -2,10 +2,12 @@ const express = require("express");
 const cors = require("cors");
 const mongoose = require("mongoose");
 
-mongoose.connect("mongodb://localhost:27017/collabcode");
+mongoose.connect(
+  "mongodb+srv://plawangshishu5029_db_user:9LOfqg2h1apgsElm@cluster0.sbba8lp.mongodb.net/collabcode?retryWrites=true&w=majority"
+);
 
 mongoose.connection.once("open", () => {
-  console.log("🗄️ MongoDB connected");
+  console.log("🗄️ MongoDB connected (Atlas)");
 });
 
 const authRoutes = require("./auth/auth.controller");
