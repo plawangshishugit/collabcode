@@ -28,10 +28,6 @@ body {
   border-left: 2px solid red;
   margin-left: -1px;
 }
-.remote-cursor {
-  border-left: 2px solid red;
-  margin-left: -1px;
-}
 
 [class^="cursor-"] {
   border-left-width: 2px;

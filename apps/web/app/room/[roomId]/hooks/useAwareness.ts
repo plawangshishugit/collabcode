@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import type * as monaco from "monaco-editor";
+import * as monaco from "monaco-editor";
 import { getUserIdentity } from "../utils/userIdentity";
 
 export function useAwareness(
@@ -11,26 +11,25 @@ export function useAwareness(
   useEffect(() => {
     if (!editor || !awareness) return;
 
-    const monacoInstance = editor.getModel()?.getLanguageId();
     const identity = getUserIdentity();
 
-    // Set local user state ONCE
+    // Set local user identity once
     awareness.setLocalState({
       user: identity,
     });
 
-    const onChange = () => {
+    const onAwarenessChange = () => {
       const states = Array.from(awareness.getStates().values());
 
       const decorations = states
         .filter(
           (s: any) =>
             s.user &&
-            s.user.id !== identity.id &&
-            s.cursor
+            s.cursor &&
+            s.user.id !== identity.id
         )
         .map((s: any) => ({
-          range: new (editor as any).constructor.Range(
+          range: new monaco.Range(
             s.cursor.lineNumber,
             s.cursor.column,
             s.cursor.lineNumber,
@@ -38,7 +37,7 @@ export function useAwareness(
           ),
           options: {
             className: "remote-cursor",
-            inlineClassName: `cursor-${s.user.id}`,
+            inlineClassName: "remote-cursor-line",
           },
         }));
 
@@ -48,10 +47,10 @@ export function useAwareness(
       );
     };
 
-    awareness.on("change", onChange);
+    awareness.on("change", onAwarenessChange);
 
     return () => {
-      awareness.off("change", onChange);
+      awareness.off("change", onAwarenessChange);
     };
   }, [editor, awareness]);
 }

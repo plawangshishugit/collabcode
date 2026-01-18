@@ -36,6 +36,15 @@ export default function EditorClient({ roomId }: { roomId: string }) {
   return (
     <div className="flex h-screen">
       <div className="flex-1">
+        <button
+          onClick={() =>
+            restoreVersion(versions.length - 2)
+          }
+          disabled={versions.length < 2}
+          className="absolute top-3 right-72 z-10 text-xs bg-zinc-800 text-zinc-200 px-3 py-1 rounded hover:bg-zinc-700 disabled:opacity-40"
+        >
+          ⏪ Shared Undo
+        </button>
         <Editor
           height="100%"
           language="javascript"
