@@ -1,14 +1,13 @@
 import { useEffect, useRef } from "react";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
-import { getCurrentUser } from "@/app/lib/auth";
 
 export function useYjsProvider(roomId: string) {
   const ydocRef = useRef<Y.Doc | null>(null);
   const providerRef = useRef<WebsocketProvider | null>(null);
   const ytextRef = useRef<Y.Text | null>(null);
 
-  // ✅ Create Yjs ONCE per room
+  // 🔁 Create Yjs document + provider ONCE per room
   useEffect(() => {
     const ydoc = new Y.Doc();
     ydocRef.current = ydoc;
@@ -20,30 +19,21 @@ export function useYjsProvider(roomId: string) {
     );
     providerRef.current = provider;
 
-    provider.on("status", (e: { status: "connected" | "disconnected" }) => {
-      console.log("PROVIDER STATUS:", e.status);
-    });
+    provider.on(
+      "status",
+      (e: { status: "connected" | "disconnected" }) => {
+        console.log("🟢 Yjs provider:", e.status);
+      }
+    );
 
-    // ✅ Bind text
+    // 🧠 Shared text
     const ytext = ydoc.getText("monaco");
     ytextRef.current = ytext;
 
+    // Optional initial content (only once)
     if (ytext.length === 0) {
       ytext.insert(0, "// Start coding...\n");
     }
-
-    // ✅ Bind authenticated user to awareness
-    const user = getCurrentUser();
-
-    provider.awareness.setLocalState({
-      user: {
-        id: user?.id,
-        name: user?.name || user?.email || "Anonymous",
-        color: user?.id
-          ? `#${user.id.slice(0, 6)}`
-          : "#888888",
-      },
-    });
 
     return () => {
       provider.destroy();
@@ -51,11 +41,11 @@ export function useYjsProvider(roomId: string) {
     };
   }, [roomId]);
 
-  // ✅ CORRECT time-travel: apply update, do NOT recreate doc
+  // ⏪ Shared time travel (apply snapshot safely)
   function restoreFromSnapshot(snapshot: Uint8Array) {
     if (!ydocRef.current) return;
 
-    console.log("⏪ Restoring CRDT snapshot");
+    console.log("⏪ Applying CRDT snapshot");
     Y.applyUpdate(ydocRef.current, snapshot);
   }
 

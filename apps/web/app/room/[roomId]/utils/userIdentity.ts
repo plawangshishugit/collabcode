@@ -1,4 +1,4 @@
-type UserIdentity = {
+export type UserIdentity = {
   id: string;
   name: string;
   color: string;
@@ -20,19 +20,25 @@ function randomColor() {
 }
 
 function randomName() {
-  return `User-${Math.floor(Math.random() * 1000)}`;
+  return `Guest-${Math.floor(Math.random() * 1000)}`;
 }
 
 export function getUserIdentity(): UserIdentity {
+  // SSR safety
   if (typeof window === "undefined") {
     return {
       id: "server",
       name: "Server",
-      color: "#999",
+      color: "#999999",
     };
   }
 
-  const stored = localStorage.getItem("collabcode:user");
+  /**
+   * IMPORTANT CHANGE
+   * Use sessionStorage instead of localStorage
+   * → each browser tab = unique user
+   */
+  const stored = sessionStorage.getItem("collabcode:user");
 
   if (stored) {
     return JSON.parse(stored);
@@ -44,7 +50,7 @@ export function getUserIdentity(): UserIdentity {
     color: randomColor(),
   };
 
-  localStorage.setItem(
+  sessionStorage.setItem(
     "collabcode:user",
     JSON.stringify(identity)
   );
