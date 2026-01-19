@@ -783,79 +783,284 @@ This prevents CRDT pollution and keeps state minimal.
 
 ---
 
-## Stage 10 – Session Analytics Dashboard
+Excellent — this is **exactly the right moment** to lock the analytics story **before deployment**.
+I’ll do two things clearly and cleanly:
 
-### Objective
+1️⃣ **Give you an updated, production-ready Stage 10 documentation section** (README-quality)
+2️⃣ **Give you a step-by-step verification checklist** to confirm analytics works **from zero → live UI**
 
-Provide **observability** into collaborative sessions, enabling:
-
-* performance analysis
-* engagement metrics
-* interview-ready system insights
+No fluff, no assumptions.
 
 ---
 
-### Metrics Tracked
+# 🧩 Stage 10 – Session Analytics Dashboard
 
-| Metric        | Description                |
-| ------------- | -------------------------- |
-| Active Users  | Live count per room        |
-| Edits         | Text changes (throttled)   |
-| Restores      | Shared time-travel actions |
-| Snapshots     | Version captures           |
-| Session Start | Room lifetime              |
+## Objective
+
+Provide **observability** into collaborative coding sessions to enable:
+
+* 📈 performance analysis
+* 👥 engagement insights
+
+This stage transforms CollabCode from *“a real-time editor”* into an **observable distributed system**.
 
 ---
 
-### Analytics Architecture
+## Metrics Tracked
+
+| Metric            | Description                                    |
+| ----------------- | ---------------------------------------------- |
+| **Active Users**  | Live count of connected users per room         |
+| **Edits**         | Number of text changes (client-side throttled) |
+| **Snapshots**     | Auto version captures (CRDT state saves)       |
+| **Restores**      | Shared time-travel / undo operations           |
+| **Session Start** | Timestamp of room creation / first join        |
+
+---
+
+## Analytics Architecture
 
 ```
-Client
+Client (EditorClient)
  ├─ emits analytics events
- │   ├─ edit
- │   ├─ snapshot
- │   └─ restore
+ │   ├─ analytics:edit
+ │   ├─ analytics:snapshot
+ │   └─ analytics:restore
  ↓
 Socket.IO Server
- ├─ in-memory aggregation
- ├─ per-room analytics state
+ ├─ per-room in-memory analytics store
+ ├─ real-time aggregation
  ↓
 Client UI
- └─ live analytics panel
+ └─ live analytics dashboard panel
 ```
 
 ---
 
-### Design Trade-offs
+## Event Flow (End-to-End)
 
-* **In-memory aggregation** for low latency
-* Persistence optional (can be enabled later)
-* Throttled events to prevent socket flooding
+### 1️⃣ Client emits analytics events
 
-This design balances **accuracy, performance, and simplicity**.
+Analytics are emitted **inside existing logic**, not duplicated:
+
+* Edit → emitted from CRDT binding
+* Snapshot → emitted when version captured
+* Restore → emitted on shared undo
+
+```ts
+socket.emit("analytics:edit", {
+  roomId,
+  userId
+});
+```
+
+Events are **throttled** to avoid socket flooding.
 
 ---
 
-### UI Composition
+### 2️⃣ Socket server aggregates metrics
+
+Server maintains **per-room analytics state** in memory:
+
+```ts
+analyticsStore[roomId] = {
+  activeUsers,
+  edits,
+  snapshots,
+  restores,
+  sessionStart
+};
+```
+
+Why in-memory?
+
+* ⚡ ultra-low latency
+* 📊 live dashboards
+
+Persistence can be added later without redesign.
+
+---
+
+### 3️⃣ Analytics broadcast to clients
+
+On every update, server emits:
+
+```
+analytics:update
+```
+
+All connected clients receive **live metrics**.
+
+---
+
+## UI Composition
 
 ```
 EditorClient
 ├── Code Editor
 ├── Version History Sidebar
+├── Output Panel
 └── Analytics Panel
 ```
 
-Each panel subscribes independently, avoiding tight coupling.
+### Design Choice
+
+Each panel:
+
+* subscribes independently
+* has no tight coupling
+* can be toggled or replaced safely
+
+This follows **modular UI + event-driven state**.
 
 ---
 
-## Overall System Guarantees (So Far)
+## Design Trade-offs
+
+### ✅ What we optimized for
+
+* Real-time feedback
+* Minimal latency
+* Interview clarity
+* Low operational complexity
+
+### ⚠️ What we intentionally deferred
+
+* Long-term analytics persistence
+* Historical cross-session reports
+* Heavy backend aggregation
+
+These can be added **without breaking the design**.
+
+---
+
+## System Guarantees (Up to Stage 10)
 
 ✔ Real-time collaboration
-✔ Conflict-free editing (CRDT)
-✔ Shared time travel
+✔ Conflict-free editing (CRDT / Yjs)
+✔ Shared time travel (global undo)
 ✔ Durable persistence (MongoDB Atlas)
-✔ Stable user identity
+✔ Stable user identity (JWT)
 ✔ Live session analytics
+✔ Execution sandbox (Web Workers)
+
+---
+
+# 🧪 How to Verify Analytics Works (FROM BEGINNING)
+
+Follow this **exact checklist**.
+
+---
+
+## Step 0️⃣ Clean start
+
+```bash
+npm run dev
+```
+
+You should see:
+
+```
+🚀 Server running on http://localhost:4000
+🗄️ MongoDB connected
+```
+
+---
+
+## Step 1️⃣ Open two clients
+
+Open **two browsers** (or incognito):
+
+```
+http://localhost:3000/room/<same-room-id>
+```
+
+---
+
+## Step 2️⃣ Verify active users
+
+**Expected:**
+
+* Analytics panel shows `Active Users = 2`
+
+**Server log should show:**
+
+```
+📊 USER JOINED roomId
+```
+
+---
+
+## Step 3️⃣ Type in editor
+
+Type continuously for 2–3 seconds.
+
+**Expected:**
+
+* Code syncs in both tabs
+* `Edits` count increases gradually (not every keystroke)
+
+**Server log:**
+
+```
+📊 EDIT roomId userId
+```
+
+---
+
+## Step 4️⃣ Wait for snapshot
+
+Stop typing for ~1 second.
+
+**Expected:**
+
+* `Snapshots` count increments
+* Version appears in Version History sidebar
+
+**Server log:**
+
+```
+📸 Snapshot saved for room <id>
+```
+
+---
+
+## Step 5️⃣ Restore a version
+
+Click any older version.
+
+**Expected:**
+
+* Code rolls back in both clients
+* `Restores` metric increments
+
+**Server log:**
+
+```
+⏪ Room <id> restored by <userId>
+```
+
+---
+
+## Step 6️⃣ Refresh page
+
+Refresh one client.
+
+**Expected:**
+
+* Editor restores latest DB snapshot
+* Analytics continue correctly
+* No duplication of metrics
+
+---
+
+## Step 7️⃣ Disconnect a client
+
+Close one tab.
+
+**Expected:**
+
+* `Active Users` decrements
+* No crash or reset
 
 ---
