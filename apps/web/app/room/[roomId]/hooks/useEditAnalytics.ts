@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import * as monaco from "monaco-editor";
+import { getCurrentUser } from "@/app/lib/auth";
 
 function throttle(fn: () => void, limit: number) {
   let last = 0;
@@ -18,10 +19,15 @@ export function useEditAnalytics(
   roomId: string
 ) {
   useEffect(() => {
-    if (!editor) return;
+    if (!editor || !socket) return;
+
+    const user = getCurrentUser();
 
     const emitEdit = throttle(() => {
-      socket.emit("analytics:edit", { roomId });
+      socket.emit("analytics:edit", {
+        roomId,
+        userId: user?.id,
+      });
     }, 500);
 
     const contentListener = editor.onDidChangeModelContent(() => {

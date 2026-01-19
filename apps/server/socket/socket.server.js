@@ -1,55 +1,32 @@
-const Y = require("yjs");
-const { getYDoc } = require("../crdt/crdt.store");
-const RoomSnapshot = require("../models/RoomSnapshot");
+const { handleRoomJoin } = require("./handlers/room.handler");
+const { handleCrdtUpdate } = require("./handlers/crdt.handler");
+const { handleSnapshot } = require("./handlers/snapshot.handler");
+const { handleRestore } = require("./handlers/restore.handler");
+const { handleEditAnalytics } = require("./handlers/analytics.handler");
 
 module.exports = function registerSocketServer(io) {
   io.on("connection", (socket) => {
     console.log("🔌 Client connected:", socket.id);
 
-    // Join room
-    socket.on("room:join", async ({ roomId }) => {
-      socket.join(roomId);
-
-      const doc = getYDoc(roomId);
-
-      // Restore last snapshot from DB (if exists)
-      const lastSnapshot = await RoomSnapshot.findOne(
-        { roomId },
-        {},
-        { sort: { createdAt: -1 } }
-      );
-
-      if (lastSnapshot) {
-        Y.applyUpdate(doc, lastSnapshot.snapshot);
-        console.log(`🔄 Room ${roomId} restored to previous state`);
-      }
-
-      // Send initial CRDT state
-      const state = Y.encodeStateAsUpdate(doc);
-      socket.emit("crdt:init", state);
+    socket.on("room:join", ({ roomId }) => {
+      handleRoomJoin(socket, roomId);
     });
 
-    // Receive CRDT updates
-    socket.on("crdt:update", async ({ roomId, update }) => {
-      const doc = getYDoc(roomId);
-      Y.applyUpdate(doc, update);
-
-      // Broadcast to others
-      socket.to(roomId).emit("crdt:update", update);
-
-      // Persist snapshot (debounced client-side already)
-      await RoomSnapshot.create({
-        roomId,
-        snapshot: update,
-      });
+    socket.on("crdt:update", ({ roomId, update }) => {
+      handleCrdtUpdate(socket, roomId, update);
     });
 
-    // Restore snapshot (shared undo / time travel)
-    socket.on("crdt:restore", ({ roomId, snapshot }) => {
-      const doc = getYDoc(roomId);
-      Y.applyUpdate(doc, snapshot);
+    socket.on("crdt:snapshot", ({ roomId, snapshot, userId }) => {
+      handleSnapshot(roomId, snapshot, userId);
+    });
 
-      socket.to(roomId).emit("crdt:update", snapshot);
+    socket.on("crdt:restore", ({ roomId, snapshot, userId }) => {
+      handleRestore(socket, roomId, snapshot, userId);
+    });
+
+    // ✅ ADD HERE
+    socket.on("analytics:edit", ({ roomId, userId }) => {
+      handleEditAnalytics(roomId, userId);
     });
 
     socket.on("disconnect", () => {

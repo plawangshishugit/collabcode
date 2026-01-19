@@ -1,24 +1,16 @@
 import { useEffect, useRef } from "react";
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
+import { getCurrentUser } from "@/app/lib/auth";
 
 export function useYjsProvider(roomId: string) {
   const ydocRef = useRef<Y.Doc | null>(null);
   const providerRef = useRef<WebsocketProvider | null>(null);
   const ytextRef = useRef<Y.Text | null>(null);
 
-  // Shared time travel entry point
-  function createYjs(snapshot?: Uint8Array) {
-    // Cleanup old instances
-    providerRef.current?.destroy();
-    ydocRef.current?.destroy();
-
+  // ✅ Create Yjs ONCE per room
+  useEffect(() => {
     const ydoc = new Y.Doc();
-
-    if (snapshot) {
-      Y.applyUpdate(ydoc, snapshot);
-    }
-
     ydocRef.current = ydoc;
 
     const provider = new WebsocketProvider(
@@ -32,34 +24,45 @@ export function useYjsProvider(roomId: string) {
       console.log("PROVIDER STATUS:", e.status);
     });
 
+    // ✅ Bind text
     const ytext = ydoc.getText("monaco");
     ytextRef.current = ytext;
 
     if (ytext.length === 0) {
       ytext.insert(0, "// Start coding...\n");
     }
-  }
 
-  // Initial creation
-  useEffect(() => {
-    createYjs();
+    // ✅ Bind authenticated user to awareness
+    const user = getCurrentUser();
+
+    provider.awareness.setLocalState({
+      user: {
+        id: user?.id,
+        name: user?.name || user?.email || "Anonymous",
+        color: user?.id
+          ? `#${user.id.slice(0, 6)}`
+          : "#888888",
+      },
+    });
 
     return () => {
-      providerRef.current?.destroy();
-      ydocRef.current?.destroy();
+      provider.destroy();
+      ydoc.destroy();
     };
   }, [roomId]);
 
-  // Shared time travel entry point
+  // ✅ CORRECT time-travel: apply update, do NOT recreate doc
   function restoreFromSnapshot(snapshot: Uint8Array) {
-    console.log(" Restoring CRDT snapshot");
-    createYjs(snapshot);
+    if (!ydocRef.current) return;
+
+    console.log("⏪ Restoring CRDT snapshot");
+    Y.applyUpdate(ydocRef.current, snapshot);
   }
 
   return {
     ydocRef,
     providerRef,
     ytextRef,
-    restoreFromSnapshot, 
+    restoreFromSnapshot,
   };
 }
