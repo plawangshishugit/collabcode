@@ -1,7 +1,7 @@
 "use client";
 
 import * as Y from "yjs";
-import { useState,useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import type * as monaco from "monaco-editor";
 import { getUserIdentity } from "./lib/identity";
 
@@ -22,40 +22,59 @@ type YTextDelta = {
   attributes?: Record<string, any>;
 };
 
-
 /* ---------------------------------- */
 /* Main hook */
 /* ---------------------------------- */
 
 export function useCollab() {
-  
+  /* ---------- Identity ---------- */
   const userRef = useRef<ReturnType<typeof getUserIdentity> | null>(null);
-
   if (!userRef.current && typeof window !== "undefined") {
     userRef.current = getUserIdentity();
   }
-  /* ---------- User role ---------- */
+
+  /* ---------- Role ---------- */
   const roleRef = useRef<"owner" | "viewer">("viewer");
   const [role, setRole] = useState<"owner" | "viewer">("viewer");
 
-  /* ---------- Core refs ---------- */
+  /* ---------- Core ---------- */
   const ydocRef = useRef<Y.Doc | null>(null);
   const ytextRef = useRef<Y.Text | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
-  /* ---------- Monaco refs ---------- */
+  /* ---------- Monaco ---------- */
   const editorRef =
     useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const decorationsRef =
     useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
 
-  /* ---------- Awareness & rooms ---------- */
+  /* ---------- Awareness / rooms ---------- */
   const awarenessRef =
     useRef<Map<string, AwarenessState>>(new Map());
   const joinedRoomRef = useRef<string | null>(null);
 
   /* ---------- Sync guards ---------- */
   const applyingRemoteRef = useRef(false);
+
+  /* ---------- WebSocket queue ---------- */
+  const pendingMessagesRef = useRef<string[]>([]);
+  const socketReadyRef = useRef(false);
+
+  /* ---------------------------------- */
+  /* Safe send (ONLY way to send WS msgs) */
+  /* ---------------------------------- */
+
+  function safeSend(message: object) {
+    const ws = wsRef.current;
+    const payload = JSON.stringify(message);
+
+    if (!ws || !socketReadyRef.current) {
+      pendingMessagesRef.current.push(payload);
+      return;
+    }
+
+    ws.send(payload);
+  }
 
   /* ---------------------------------- */
   /* WebSocket + Yjs setup */
@@ -66,31 +85,49 @@ export function useCollab() {
     const ytext = ydoc.getText("editor");
     const ws = new WebSocket("ws://localhost:3001");
 
+    ws.onopen = () => {
+      socketReadyRef.current = true;
+
+      // flush queued messages
+      pendingMessagesRef.current.forEach((msg) => ws.send(msg));
+      pendingMessagesRef.current = [];
+    };
+
+    ws.onclose = () => {
+      socketReadyRef.current = false;
+    };
+
+    ws.onerror = () => {
+      socketReadyRef.current = false;
+    };
+
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
 
       if (data.type === "sync" || data.type === "update") {
         Y.applyUpdate(ydoc, new Uint8Array(data.update));
       }
+
       if (data.type === "permission") {
         roleRef.current = data.role;
         setRole(data.role);
       }
+
       if (data.type === "awareness") {
         awarenessRef.current.set(data.user, data.payload);
         renderRemoteCursors();
       }
     };
 
+    // Yjs → server (persisted)
     ydoc.on("update", (update) => {
-      ws.send(
-        JSON.stringify({
-          type: "update",
-          update: Array.from(update),
-        })
-      );
+      safeSend({
+        type: "update",
+        update: Array.from(update),
+      });
     });
 
+    // Yjs → Monaco
     ytext.observe((event) => applyYjsToMonaco(event.delta));
 
     ydocRef.current = ydoc;
@@ -119,34 +156,31 @@ export function useCollab() {
     editor.onDidChangeCursorSelection(sendCursorAwareness);
   }
 
-function handleEditorChange(
-  e: monaco.editor.IModelContentChangedEvent
-) {
-  // 🚫 Block edits coming from remote Yjs updates
-  if (applyingRemoteRef.current) return;
+  function handleEditorChange(
+    e: monaco.editor.IModelContentChangedEvent
+  ) {
+    if (applyingRemoteRef.current) return;
+    if (roleRef.current === "viewer") return;
 
-  // 🚫 Block edits if user is a viewer (read-only)
-  if (roleRef.current === "viewer") return;
+    const ytext = ytextRef.current;
+    const model = editorRef.current?.getModel();
+    if (!ytext || !model) return;
 
-  const ytext = ytextRef.current;
-  const model = editorRef.current?.getModel();
-  if (!ytext || !model) return;
+    e.changes.forEach((change) => {
+      const start = model.getOffsetAt({
+        lineNumber: change.range.startLineNumber,
+        column: change.range.startColumn,
+      });
 
-  e.changes.forEach((change) => {
-    const start = model.getOffsetAt({
-      lineNumber: change.range.startLineNumber,
-      column: change.range.startColumn,
+      if (change.rangeLength > 0) {
+        ytext.delete(start, change.rangeLength);
+      }
+
+      if (change.text.length > 0) {
+        ytext.insert(start, change.text);
+      }
     });
-
-    if (change.rangeLength > 0) {
-      ytext.delete(start, change.rangeLength);
-    }
-
-    if (change.text.length > 0) {
-      ytext.insert(start, change.text);
-    }
-  });
-}
+  }
 
   /* ---------------------------------- */
   /* Yjs → Monaco */
@@ -158,7 +192,6 @@ function handleEditorChange(
     if (!editor || !model) return;
 
     applyingRemoteRef.current = true;
-
     let index = 0;
 
     delta.forEach((d) => {
@@ -213,24 +246,18 @@ function handleEditorChange(
     const identity = userRef.current;
     if (!identity) return;
 
-    wsRef.current?.send(
-      JSON.stringify({
-        type: "awareness",
-        user: identity.id,
-        payload: {
-          name: identity.name,
-          color: identity.color,
-          cursor: {
-            start: model.getOffsetAt(
-              selection.getStartPosition()
-            ),
-            end: model.getOffsetAt(
-              selection.getEndPosition()
-            ),
-          },
+    safeSend({
+      type: "awareness",
+      user: identity.id,
+      payload: {
+        name: identity.name,
+        color: identity.color,
+        cursor: {
+          start: model.getOffsetAt(selection.getStartPosition()),
+          end: model.getOffsetAt(selection.getEndPosition()),
         },
-      })
-    );
+      },
+    });
   }
 
   function renderRemoteCursors() {
@@ -267,30 +294,43 @@ function handleEditorChange(
   /* ---------------------------------- */
   /* Rooms & undo */
   /* ---------------------------------- */
-function joinRoom(roomId: string) {
-  if (joinedRoomRef.current === roomId) return;
-  if (!wsRef.current || !userRef.current) return;
 
-  joinedRoomRef.current = roomId;
+  function joinRoom(
+    roomId: string,
+    mode: "edit" | "read" = "edit"
+  ) {
+    if (joinedRoomRef.current === roomId) return;
+    if (!userRef.current) return;
 
-  wsRef.current.send(
-    JSON.stringify({
+    joinedRoomRef.current = roomId;
+
+    safeSend({
       type: "join",
       roomId,
       userId: userRef.current.id,
-    })
-  );
-}
+      mode,
+    });
+  }
 
-function undo() {
-  if (roleRef.current === "viewer") return;
-  wsRef.current?.send(JSON.stringify({ type: "undo", userId: userRef.current?.id }));
-}
+  function undo() {
+    if (roleRef.current === "viewer") return;
+    if (!userRef.current) return;
 
-function redo() {
-  if (roleRef.current === "viewer") return;
-  wsRef.current?.send(JSON.stringify({ type: "redo", userId: userRef.current?.id }));
-}
+    safeSend({
+      type: "undo",
+      userId: userRef.current.id,
+    });
+  }
+
+  function redo() {
+    if (roleRef.current === "viewer") return;
+    if (!userRef.current) return;
+
+    safeSend({
+      type: "redo",
+      userId: userRef.current.id,
+    });
+  }
 
   return { onEditorMount, undo, redo, joinRoom, role };
 }

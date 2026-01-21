@@ -3,6 +3,8 @@
 import dynamic from "next/dynamic";
 import { useParams } from "next/navigation";
 import { useCollab } from "../../useCollab";
+import { useSearchParams } from "next/navigation";
+import { useEffect } from "react";
 
 const MonacoEditor = dynamic(
   () => import("@monaco-editor/react"),
@@ -11,10 +13,12 @@ const MonacoEditor = dynamic(
 
 export default function RoomPage() {
   const { id } = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  const mode = searchParams.get("mode") === "read" ? "read" : "edit";
   const { onEditorMount, undo, redo, joinRoom, role } = useCollab();
-
-  // join room once
-  joinRoom(id);
+  useEffect(() => {
+    joinRoom(id, mode);
+  }, [id, mode]);
 
   return (
     <main className="h-screen flex flex-col">
@@ -27,6 +31,16 @@ export default function RoomPage() {
         </button>
         <button onClick={redo} className="px-3 py-1 border rounded">
           Redo
+        </button>
+        <button
+          onClick={() =>
+            navigator.clipboard.writeText(
+              `${window.location.origin}/room/${id}?mode=read`
+            )
+          }
+          className="px-3 py-1 border rounded"
+        >
+          Copy Read-Only Link
         </button>
       </header>
 

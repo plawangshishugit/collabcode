@@ -65,19 +65,31 @@ wss.on("connection", (ws) => {
       roomId = data.roomId;
       room = getRoom(roomId, data.userId);
 
-    // If room already exists, ownerId is preserved
-    if (!room.ownerId) {
-      room.ownerId = data.userId;
-    }
-
       room.clients.add(ws);
 
-      // send full document state
+      // 👑 Assign owner ONLY if mode !== read
+      if (!room.ownerId && data.mode !== "read") {
+        room.ownerId = data.userId;
+      }
+
+      // Send document
       ws.send(
         JSON.stringify({
           type: "sync",
-          role: room.ownerId === data.userId ? "owner" : "viewer",
           update: Array.from(Y.encodeStateAsUpdate(room.ydoc)),
+        })
+      );
+
+      // Send permission
+      const role =
+        room.ownerId === data.userId && data.mode !== "read"
+          ? "owner"
+          : "viewer";
+
+      ws.send(
+        JSON.stringify({
+          type: "permission",
+          role,
         })
       );
 
