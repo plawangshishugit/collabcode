@@ -1,7 +1,7 @@
 "use client";
 
 import * as Y from "yjs";
-import { useEffect, useRef } from "react";
+import { useState,useEffect, useRef } from "react";
 import type * as monaco from "monaco-editor";
 import { getUserIdentity } from "./lib/identity";
 
@@ -22,26 +22,21 @@ type YTextDelta = {
   attributes?: Record<string, any>;
 };
 
-/* ---------------------------------- */
-/* User identity (stable per tab) */
-/* ---------------------------------- */
-
-const user = {
-  id: Math.random().toString(36).slice(2),
-  name: "User " + Math.floor(Math.random() * 100),
-  color: `hsl(${Math.random() * 360}, 70%, 60%)`,
-};
 
 /* ---------------------------------- */
 /* Main hook */
 /* ---------------------------------- */
 
 export function useCollab() {
+  
   const userRef = useRef<ReturnType<typeof getUserIdentity> | null>(null);
 
   if (!userRef.current && typeof window !== "undefined") {
     userRef.current = getUserIdentity();
   }
+  /* ---------- User role ---------- */
+  const roleRef = useRef<"owner" | "viewer">("viewer");
+  const [role, setRole] = useState<"owner" | "viewer">("viewer");
 
   /* ---------- Core refs ---------- */
   const ydocRef = useRef<Y.Doc | null>(null);
@@ -77,7 +72,10 @@ export function useCollab() {
       if (data.type === "sync" || data.type === "update") {
         Y.applyUpdate(ydoc, new Uint8Array(data.update));
       }
-
+      if (data.type === "permission") {
+        roleRef.current = data.role;
+        setRole(data.role);
+      }
       if (data.type === "awareness") {
         awarenessRef.current.set(data.user, data.payload);
         renderRemoteCursors();
@@ -121,29 +119,34 @@ export function useCollab() {
     editor.onDidChangeCursorSelection(sendCursorAwareness);
   }
 
-  function handleEditorChange(
-    e: monaco.editor.IModelContentChangedEvent
-  ) {
-    if (applyingRemoteRef.current) return;
+function handleEditorChange(
+  e: monaco.editor.IModelContentChangedEvent
+) {
+  // 🚫 Block edits coming from remote Yjs updates
+  if (applyingRemoteRef.current) return;
 
-    const ytext = ytextRef.current;
-    const model = editorRef.current?.getModel();
-    if (!ytext || !model) return;
+  // 🚫 Block edits if user is a viewer (read-only)
+  if (roleRef.current === "viewer") return;
 
-    e.changes.forEach((change) => {
-      const start = model.getOffsetAt({
-        lineNumber: change.range.startLineNumber,
-        column: change.range.startColumn,
-      });
+  const ytext = ytextRef.current;
+  const model = editorRef.current?.getModel();
+  if (!ytext || !model) return;
 
-      if (change.rangeLength > 0) {
-        ytext.delete(start, change.rangeLength);
-      }
-      if (change.text.length > 0) {
-        ytext.insert(start, change.text);
-      }
+  e.changes.forEach((change) => {
+    const start = model.getOffsetAt({
+      lineNumber: change.range.startLineNumber,
+      column: change.range.startColumn,
     });
-  }
+
+    if (change.rangeLength > 0) {
+      ytext.delete(start, change.rangeLength);
+    }
+
+    if (change.text.length > 0) {
+      ytext.insert(start, change.text);
+    }
+  });
+}
 
   /* ---------------------------------- */
   /* Yjs → Monaco */
@@ -264,22 +267,30 @@ export function useCollab() {
   /* ---------------------------------- */
   /* Rooms & undo */
   /* ---------------------------------- */
+function joinRoom(roomId: string) {
+  if (joinedRoomRef.current === roomId) return;
+  if (!wsRef.current || !userRef.current) return;
 
-  function joinRoom(roomId: string) {
-    if (joinedRoomRef.current === roomId) return;
-    if (!wsRef.current) return;
+  joinedRoomRef.current = roomId;
 
-    joinedRoomRef.current = roomId;
-    wsRef.current.send(JSON.stringify({ type: "join", roomId }));
-  }
+  wsRef.current.send(
+    JSON.stringify({
+      type: "join",
+      roomId,
+      userId: userRef.current.id,
+    })
+  );
+}
 
-  function undo() {
-    wsRef.current?.send(JSON.stringify({ type: "undo" }));
-  }
+function undo() {
+  if (roleRef.current === "viewer") return;
+  wsRef.current?.send(JSON.stringify({ type: "undo", userId: userRef.current?.id }));
+}
 
-  function redo() {
-    wsRef.current?.send(JSON.stringify({ type: "redo" }));
-  }
+function redo() {
+  if (roleRef.current === "viewer") return;
+  wsRef.current?.send(JSON.stringify({ type: "redo", userId: userRef.current?.id }));
+}
 
-  return { onEditorMount, undo, redo, joinRoom };
+  return { onEditorMount, undo, redo, joinRoom, role };
 }

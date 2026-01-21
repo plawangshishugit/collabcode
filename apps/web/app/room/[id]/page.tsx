@@ -11,7 +11,7 @@ const MonacoEditor = dynamic(
 
 export default function RoomPage() {
   const { id } = useParams<{ id: string }>();
-  const { onEditorMount, undo, redo, joinRoom } = useCollab();
+  const { onEditorMount, undo, redo, joinRoom, role } = useCollab();
 
   // join room once
   joinRoom(id);
@@ -37,6 +37,8 @@ export default function RoomPage() {
 
         onMount={onEditorMount}
         options={{
+          readOnly: role === "viewer",
+          cursorStyle: role ==="viewer" ? "line-thin" : "line",
           fontSize: 14,
           minimap: { enabled: false },
           automaticLayout: true,

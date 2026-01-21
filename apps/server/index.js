@@ -18,7 +18,7 @@ const wss = new WebSocketServer({ server });
  */
 const rooms = new Map();
 
-function getRoom(roomId) {
+function getRoom(roomId, creatorId = null) {
   if (!rooms.has(roomId)) {
     const ydoc = new Y.Doc();
     const ytext = ydoc.getText("editor");
@@ -26,7 +26,6 @@ function getRoom(roomId) {
     const persisted = loadRoom(roomId);
     if (persisted) {
       Y.applyUpdate(ydoc, persisted);
-      console.log(`📂 Loaded room ${roomId} from disk`);
     }
 
     const undoManager = new Y.UndoManager(ytext, {
@@ -38,6 +37,7 @@ function getRoom(roomId) {
       ytext,
       undoManager,
       clients: new Set(),
+      ownerId: creatorId, // 👑 owner
     });
   }
   return rooms.get(roomId);
@@ -63,13 +63,20 @@ wss.on("connection", (ws) => {
      */
     if (data.type === "join") {
       roomId = data.roomId;
-      room = getRoom(roomId);
+      room = getRoom(roomId, data.userId);
+
+    // If room already exists, ownerId is preserved
+    if (!room.ownerId) {
+      room.ownerId = data.userId;
+    }
+
       room.clients.add(ws);
 
       // send full document state
       ws.send(
         JSON.stringify({
           type: "sync",
+          role: room.ownerId === data.userId ? "owner" : "viewer",
           update: Array.from(Y.encodeStateAsUpdate(room.ydoc)),
         })
       );
@@ -83,29 +90,26 @@ wss.on("connection", (ws) => {
      * 2️⃣ Document updates
      */
     if (data.type === "update") {
+      if (room.ownerId !== data.userId) return; // 🚫 viewer blocked
+
       const update = new Uint8Array(data.update);
       Y.applyUpdate(room.ydoc, update);
-
-      saveRoom(roomId, room.ydoc); // ✅ persistence
-
+      saveRoom(roomId, room.ydoc);
       broadcast(room, { type: "update", update: data.update }, ws);
     }
-
     /**
      * 3️⃣ Shared undo / redo
      */
     if (data.type === "undo") {
-      if (room.undoManager.canUndo()) {
-        room.undoManager.undo();
-        saveRoom(roomId, room.ydoc);
-      }
+      if (room.ownerId !== data.userId) return;
+      room.undoManager.undo();
+      saveRoom(roomId, room.ydoc);
     }
 
     if (data.type === "redo") {
-      if (room.undoManager.canRedo()) {
-        room.undoManager.redo();
-        saveRoom(roomId, room.ydoc);
-      }
+      if (room.ownerId !== data.userId) return;
+      room.undoManager.redo();
+      saveRoom(roomId, room.ydoc);
     }
     /**
      * 4️⃣ Awareness relay
