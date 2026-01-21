@@ -3,6 +3,7 @@
 import * as Y from "yjs";
 import { useEffect, useRef } from "react";
 import type * as monaco from "monaco-editor";
+import { getUserIdentity } from "./lib/identity";
 
 /* ---------------------------------- */
 /* Types */
@@ -36,6 +37,12 @@ const user = {
 /* ---------------------------------- */
 
 export function useCollab() {
+  const userRef = useRef<ReturnType<typeof getUserIdentity> | null>(null);
+
+  if (!userRef.current && typeof window !== "undefined") {
+    userRef.current = getUserIdentity();
+  }
+
   /* ---------- Core refs ---------- */
   const ydocRef = useRef<Y.Doc | null>(null);
   const ytextRef = useRef<Y.Text | null>(null);
@@ -200,13 +207,16 @@ export function useCollab() {
     const selection = editor?.getSelection();
     if (!editor || !model || !selection) return;
 
+    const identity = userRef.current;
+    if (!identity) return;
+
     wsRef.current?.send(
       JSON.stringify({
         type: "awareness",
-        user: user.id,
+        user: identity.id,
         payload: {
-          name: user.name,
-          color: user.color,
+          name: identity.name,
+          color: identity.color,
           cursor: {
             start: model.getOffsetAt(
               selection.getStartPosition()

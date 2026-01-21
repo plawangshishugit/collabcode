@@ -1,0 +1,32 @@
+export type UserIdentity = {
+  id: string;
+  name: string;
+  color: string;
+};
+
+export function getUserIdentity(): UserIdentity {
+  if (typeof window === "undefined") {
+    throw new Error("Client only");
+  }
+
+  let id = localStorage.getItem("collab:user:id");
+  let name = localStorage.getItem("collab:user:name");
+  let color = localStorage.getItem("collab:user:color");
+
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem("collab:user:id", id);
+  }
+
+  if (!name) {
+    name = prompt("Enter your name") || "Anonymous";
+    localStorage.setItem("collab:user:name", name);
+  }
+
+  if (!color) {
+    color = `hsl(${Math.random() * 360}, 70%, 60%)`;
+    localStorage.setItem("collab:user:color", color);
+  }
+
+  return { id, name, color };
+}
