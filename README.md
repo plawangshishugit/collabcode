@@ -1,3 +1,45 @@
+## Node version
+Use Node 18 LTS:
+nvm use
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## 1️⃣ Project Overview
 
 **CollabCode** is a web-based real-time collaborative code editor where multiple users can join a shared session (room) and edit code together.
