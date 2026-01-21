@@ -12,99 +12,102 @@ const server = app.listen(PORT, () => {
 const wss = new WebSocketServer({ server });
 
 /**
- * 1. Shared Yjs document
+ * Room registry
+ * roomId -> { ydoc, ytext, undoManager, clients }
  */
-const ydoc = new Y.Doc();
-const ytext = ydoc.getText("editor");
+const rooms = new Map();
 
-/**
- * 2. GLOBAL Undo Manager
- * This is the key to shared undo
- */
-const undoManager = new Y.UndoManager(ytext, {
-  captureTimeout: 500, // group rapid edits
-});
+function getRoom(roomId) {
+  if (!rooms.has(roomId)) {
+    const ydoc = new Y.Doc();
+    const ytext = ydoc.getText("editor");
+    const undoManager = new Y.UndoManager(ytext, {
+      captureTimeout: 500,
+    });
 
-/**
- * 3. Broadcast helper
- */
-function broadcastUpdate(update, except = null) {
-  wss.clients.forEach((client) => {
+    rooms.set(roomId, {
+      ydoc,
+      ytext,
+      undoManager,
+      clients: new Set(),
+    });
+  }
+  return rooms.get(roomId);
+}
+
+function broadcast(room, message, except = null) {
+  room.clients.forEach((client) => {
     if (client !== except && client.readyState === 1) {
-      client.send(
-        JSON.stringify({
-          type: "update",
-          update: Array.from(update),
-        })
-      );
+      client.send(JSON.stringify(message));
     }
   });
 }
 
-/**
- * 4. WebSocket handling
- */
 wss.on("connection", (ws) => {
-  console.log("🔵 Client connected");
+  let roomId = null;
+  let room = null;
 
-  // Send full state on connect
-  ws.send(
-    JSON.stringify({
-      type: "sync",
-      update: Array.from(Y.encodeStateAsUpdate(ydoc)),
-    })
-  );
-
-  ws.on("message", (message) => {
-    const data = JSON.parse(message.toString());
+  ws.on("message", (raw) => {
+    const data = JSON.parse(raw.toString());
 
     /**
-     * Awareness updates (cursor, user info)
+     * 1️⃣ Join room
      */
-    if (data.type === "awareness") {
-      wss.clients.forEach((client) => {
-        if (client !== ws && client.readyState === 1) {
-          client.send(JSON.stringify(data));
-        }
-      });
+    if (data.type === "join") {
+      roomId = data.roomId;
+      room = getRoom(roomId);
+      room.clients.add(ws);
+
+      // send full document state
+      ws.send(
+        JSON.stringify({
+          type: "sync",
+          update: Array.from(Y.encodeStateAsUpdate(room.ydoc)),
+        })
+      );
+
+      return;
     }
-    
+
+    if (!room) return;
+
     /**
-     * Apply document updates
+     * 2️⃣ Document updates
      */
     if (data.type === "update") {
       const update = new Uint8Array(data.update);
-      Y.applyUpdate(ydoc, update);
-      broadcastUpdate(update, ws);
+      Y.applyUpdate(room.ydoc, update);
+      broadcast(room, { type: "update", update: data.update }, ws);
     }
 
     /**
-     * SHARED UNDO
+     * 3️⃣ Shared undo / redo
      */
     if (data.type === "undo") {
-      if (undoManager.canUndo()) {
-        undoManager.undo();
-      }
+      room.undoManager.canUndo() && room.undoManager.undo();
+    }
+
+    if (data.type === "redo") {
+      room.undoManager.canRedo() && room.undoManager.redo();
     }
 
     /**
-     * SHARED REDO
+     * 4️⃣ Awareness relay
      */
-    if (data.type === "redo") {
-      if (undoManager.canRedo()) {
-        undoManager.redo();
-      }
+    if (data.type === "awareness") {
+      broadcast(room, data, ws);
     }
   });
 
   ws.on("close", () => {
-    console.log("🔴 Client disconnected");
-  });
-});
+    if (!room) return;
 
-/**
- * 5. Broadcast undo/redo changes
- */
-ydoc.on("update", (update) => {
-  broadcastUpdate(update);
+    room.clients.delete(ws);
+
+    // Cleanup empty rooms
+    if (room.clients.size === 0) {
+      rooms.delete(roomId);
+      console.log(`🧹 Room ${roomId} cleaned up`);
+    }
+  });
 });

@@ -1,44 +1,29 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { useCollab } from "./useCollab";
-
-const MonacoEditor = dynamic(
-  () => import("@monaco-editor/react"),
-  { ssr: false }
-);
+import { useRouter } from "next/navigation";
 
 export default function Home() {
-  const { onEditorMount, undo, redo } = useCollab();
+  const router = useRouter();
+
+  function createRoom() {
+    const id = crypto.randomUUID().slice(0, 8);
+    router.push(`/room/${id}`);
+  }
 
   return (
-    <main className="h-screen flex flex-col">
-      <header className="p-3 border-b flex gap-2">
-        <button
-          onClick={undo}
-          className="px-3 py-1 border rounded"
-        >
-          Undo
-        </button>
-        <button
-          onClick={redo}
-          className="px-3 py-1 border rounded"
-        >
-          Redo
-        </button>
-      </header>
+    <main className="h-screen flex items-center justify-center">
+      <div className="flex flex-col gap-4 items-center">
+        <h1 className="text-2xl font-bold">
+          Collaborative Editor
+        </h1>
 
-      <MonacoEditor
-        height="100%"
-        defaultLanguage="typescript"
-        defaultValue=""
-        onMount={onEditorMount}
-        options={{
-          fontSize: 14,
-          minimap: { enabled: false },
-          automaticLayout: true,
-        }}
-      />
+        <button
+          onClick={createRoom}
+          className="px-6 py-3 border rounded text-lg hover:bg-gray-100"
+        >
+          Create New Room
+        </button>
+      </div>
     </main>
   );
 }
