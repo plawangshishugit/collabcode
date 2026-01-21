@@ -1,6 +1,7 @@
 import express from "express";
 import { WebSocketServer } from "ws";
 import * as Y from "yjs";
+import { loadRoom, saveRoom } from "./persistence/fileStore.js";
 
 const app = express();
 const PORT = 3001;
@@ -21,6 +22,13 @@ function getRoom(roomId) {
   if (!rooms.has(roomId)) {
     const ydoc = new Y.Doc();
     const ytext = ydoc.getText("editor");
+
+    const persisted = loadRoom(roomId);
+    if (persisted) {
+      Y.applyUpdate(ydoc, persisted);
+      console.log(`📂 Loaded room ${roomId} from disk`);
+    }
+
     const undoManager = new Y.UndoManager(ytext, {
       captureTimeout: 500,
     });
@@ -77,6 +85,9 @@ wss.on("connection", (ws) => {
     if (data.type === "update") {
       const update = new Uint8Array(data.update);
       Y.applyUpdate(room.ydoc, update);
+
+      saveRoom(roomId, room.ydoc); // ✅ persistence
+
       broadcast(room, { type: "update", update: data.update }, ws);
     }
 
@@ -84,13 +95,18 @@ wss.on("connection", (ws) => {
      * 3️⃣ Shared undo / redo
      */
     if (data.type === "undo") {
-      room.undoManager.canUndo() && room.undoManager.undo();
+      if (room.undoManager.canUndo()) {
+        room.undoManager.undo();
+        saveRoom(roomId, room.ydoc);
+      }
     }
 
     if (data.type === "redo") {
-      room.undoManager.canRedo() && room.undoManager.redo();
+      if (room.undoManager.canRedo()) {
+        room.undoManager.redo();
+        saveRoom(roomId, room.ydoc);
+      }
     }
-
     /**
      * 4️⃣ Awareness relay
      */
