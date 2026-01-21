@@ -31,8 +31,10 @@ export default function RoomPage() {
       </header>
 
       <MonacoEditor
-        height="100%"
+        height="100vh"
         defaultLanguage="typescript"
+        theme="vs-dark"
+
         onMount={onEditorMount}
         options={{
           fontSize: 14,
@@ -43,3 +45,4 @@ export default function RoomPage() {
     </main>
   );
 }
+
