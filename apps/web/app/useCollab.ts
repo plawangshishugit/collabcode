@@ -1,7 +1,7 @@
 "use client";
 
 import * as Y from "yjs";
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type * as monaco from "monaco-editor";
 import { getUserIdentity } from "./lib/identity";
 
@@ -9,192 +9,124 @@ import { getUserIdentity } from "./lib/identity";
 /* Types */
 /* ---------------------------------- */
 
-type AwarenessState = {
-  name: string;
-  color: string;
-  cursor: { start: number; end: number };
-};
-
 type YTextDelta = {
-  insert?: string | object;
+  insert?: string;
   delete?: number;
   retain?: number;
-  attributes?: Record<string, any>;
 };
 
 /* ---------------------------------- */
-/* Main hook */
+/* Hook */
 /* ---------------------------------- */
 
 export function useCollab() {
   /* ---------- Identity ---------- */
   const userRef = useRef<ReturnType<typeof getUserIdentity> | null>(null);
-  if (!userRef.current && typeof window !== "undefined") {
-    userRef.current = getUserIdentity();
-  }
 
-  /* ---------- Role ---------- */
-  const roleRef = useRef<"owner" | "viewer">("viewer");
-  const [role, setRole] = useState<"owner" | "viewer">("viewer");
+  /* ---------- State ---------- */
+  const [isConnected, setIsConnected] = useState(false);
+  const [role, setRole] = useState<"owner" | "viewer" | null>(null);
+  const pendingInitialSyncRef = useRef<boolean>(false);
 
   /* ---------- Core ---------- */
+  const wsRef = useRef<WebSocket | null>(null);
   const ydocRef = useRef<Y.Doc | null>(null);
   const ytextRef = useRef<Y.Text | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
+  const undoManagerRef = useRef<Y.UndoManager | null>(null);
 
   /* ---------- Monaco ---------- */
-  const editorRef =
-    useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
-  const decorationsRef =
-    useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
 
-  /* ---------- Awareness / rooms ---------- */
-  const awarenessRef =
-    useRef<Map<string, AwarenessState>>(new Map());
-  const joinedRoomRef = useRef<string | null>(null);
-
-  /* ---------- Sync guards ---------- */
+  /* ---------- Guards ---------- */
   const applyingRemoteRef = useRef(false);
-
-  /* ---------- WebSocket queue ---------- */
-  const pendingMessagesRef = useRef<string[]>([]);
-  const socketReadyRef = useRef(false);
+  const joinedRoomRef = useRef<string | null>(null);
+  const strictCleanupRef = useRef(false);
 
   /* ---------------------------------- */
-  /* Safe send (ONLY way to send WS msgs) */
+  /* Setup (ONCE) */
   /* ---------------------------------- */
 
-  function safeSend(message: object) {
-    const ws = wsRef.current;
-    const payload = JSON.stringify(message);
+useEffect(() => {
+  let alive = true; // ✅ correct StrictMode-safe guard
 
-    if (!ws || !socketReadyRef.current) {
-      pendingMessagesRef.current.push(payload);
+  // ✅ identity (client only)
+  userRef.current = getUserIdentity();
+
+  const ydoc = new Y.Doc();
+  const ytext = ydoc.getText("editor");
+  const undoManager = new Y.UndoManager(ytext);
+
+  ydocRef.current = ydoc;
+  ytextRef.current = ytext;
+  undoManagerRef.current = undoManager;
+
+  const ws = new WebSocket("ws://localhost:3001");
+  wsRef.current = ws;
+
+  ws.onopen = () => {
+    if (!alive) return;
+    console.log("🟢 WS connected");
+    setIsConnected(true);
+  };
+
+  ws.onmessage = (event) => {
+    if (!alive) return;
+
+    const data = JSON.parse(event.data);
+    console.log("📥 WS message", data);
+
+    if (data.type === "permission") {
+      setRole(data.role);
+      editorRef.current?.updateOptions({
+        readOnly: data.role !== "owner",
+      });
       return;
     }
 
-    ws.send(payload);
-  }
+    if (data.type === "sync") {
+      Y.applyUpdate(ydoc, new Uint8Array(data.update));
 
-  /* ---------------------------------- */
-  /* WebSocket + Yjs setup */
-  /* ---------------------------------- */
+      // Mark that sync is ready
+      pendingInitialSyncRef.current = true;
 
-  useEffect(() => {
-    const ydoc = new Y.Doc();
-    const ytext = ydoc.getText("editor");
-    const ws = new WebSocket("ws://localhost:3001");
+      // Try applying immediately (if editor already exists)
+      const editor = editorRef.current;
+      const model = editor?.getModel();
+      const ytext = ytextRef.current;
 
-    ws.onopen = () => {
-      socketReadyRef.current = true;
-
-      // flush queued messages
-      pendingMessagesRef.current.forEach((msg) => ws.send(msg));
-      pendingMessagesRef.current = [];
-    };
-
-    ws.onclose = () => {
-      socketReadyRef.current = false;
-    };
-
-    ws.onerror = () => {
-      socketReadyRef.current = false;
-    };
-
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-
-      if (data.type === "sync" || data.type === "update") {
-        Y.applyUpdate(ydoc, new Uint8Array(data.update));
+      if (editor && model && ytext) {
+        applyingRemoteRef.current = true;
+        model.setValue(ytext.toString());
+        applyingRemoteRef.current = false;
+        pendingInitialSyncRef.current = false;
       }
 
-      if (data.type === "permission") {
-        roleRef.current = data.role;
-        setRole(data.role);
-      }
+      return;
+    }
 
-      if (data.type === "awareness") {
-        awarenessRef.current.set(data.user, data.payload);
-        renderRemoteCursors();
-      }
-    };
+    if (data.type === "update") {
+      Y.applyUpdate(ydoc, new Uint8Array(data.update));
+    }
+  };
 
-    // Yjs → server (persisted)
-    ydoc.on("update", (update) => {
-      safeSend({
-        type: "update",
-        update: Array.from(update),
-      });
-    });
+  ws.onclose = () => {
+    if (!alive) return;
+    console.log("🔴 WS closed");
+    setIsConnected(false);
+  };
 
-    // Yjs → Monaco
-    ytext.observe((event) => applyYjsToMonaco(event.delta));
-
-    ydocRef.current = ydoc;
-    ytextRef.current = ytext;
-    wsRef.current = ws;
-
-    return () => {
-      decorationsRef.current?.clear();
-      ws.close();
-      ydoc.destroy();
-    };
-  }, []);
-
-  /* ---------------------------------- */
-  /* Monaco → Yjs */
-  /* ---------------------------------- */
-
-  function onEditorMount(
-    editor: monaco.editor.IStandaloneCodeEditor
-  ) {
-    editorRef.current = editor;
-    decorationsRef.current =
-      editor.createDecorationsCollection();
-
-    editor.onDidChangeModelContent(handleEditorChange);
-    editor.onDidChangeCursorSelection(sendCursorAwareness);
-  }
-
-  function handleEditorChange(
-    e: monaco.editor.IModelContentChangedEvent
-  ) {
+  // Yjs → Monaco
+  const observer = (event: any) => {
     if (applyingRemoteRef.current) return;
-    if (roleRef.current === "viewer") return;
 
-    const ytext = ytextRef.current;
-    const model = editorRef.current?.getModel();
-    if (!ytext || !model) return;
-
-    e.changes.forEach((change) => {
-      const start = model.getOffsetAt({
-        lineNumber: change.range.startLineNumber,
-        column: change.range.startColumn,
-      });
-
-      if (change.rangeLength > 0) {
-        ytext.delete(start, change.rangeLength);
-      }
-
-      if (change.text.length > 0) {
-        ytext.insert(start, change.text);
-      }
-    });
-  }
-
-  /* ---------------------------------- */
-  /* Yjs → Monaco */
-  /* ---------------------------------- */
-
-  function applyYjsToMonaco(delta: YTextDelta[]) {
     const editor = editorRef.current;
     const model = editor?.getModel();
     if (!editor || !model) return;
 
     applyingRemoteRef.current = true;
-    let index = 0;
 
-    delta.forEach((d) => {
+    let index = 0;
+    event.delta.forEach((d: any) => {
       if (d.retain) index += d.retain;
 
       if (d.delete) {
@@ -213,7 +145,7 @@ export function useCollab() {
         ]);
       }
 
-      if (typeof d.insert === "string") {
+      if (d.insert) {
         const pos = model.getPositionAt(index);
         model.applyEdits([
           {
@@ -231,106 +163,134 @@ export function useCollab() {
     });
 
     applyingRemoteRef.current = false;
-  }
+  };
 
+  ytext.observe(observer);
+
+  return () => {
+    alive = false; // ✅ this is the ONLY guard you need
+    ytext.unobserve(observer);
+    ws.close();
+    ydoc.destroy();
+  };
+}, []);
+useEffect(() => {
+  if (!ydocRef.current) return;
+  if (!wsRef.current) return;
+
+  const ydoc = ydocRef.current;
+
+  const onYjsUpdate = (update: Uint8Array, origin: any) => {
+    // 🚫 Ignore remote updates
+    if (origin === "remote") return;
+
+    // 🔐 Only owner can persist
+    if (role !== "owner") return;
+
+    wsRef.current!.send(
+      JSON.stringify({
+        type: "update",
+        update: Array.from(update),
+        userId: userRef.current!.id,
+      })
+    );
+  };
+
+  ydoc.on("update", onYjsUpdate);
+
+  return () => {
+    ydoc.off("update", onYjsUpdate);
+  };
+}, [role]);
   /* ---------------------------------- */
-  /* Awareness */
+  /* Editor mount */
   /* ---------------------------------- */
 
-  function sendCursorAwareness() {
-    const editor = editorRef.current;
-    const model = editor?.getModel();
-    const selection = editor?.getSelection();
-    if (!editor || !model || !selection) return;
+  function onEditorMount(
+    editor: monaco.editor.IStandaloneCodeEditor
+  ) {
+    editorRef.current = editor;
 
-    const identity = userRef.current;
-    if (!identity) return;
-
-    safeSend({
-      type: "awareness",
-      user: identity.id,
-      payload: {
-        name: identity.name,
-        color: identity.color,
-        cursor: {
-          start: model.getOffsetAt(selection.getStartPosition()),
-          end: model.getOffsetAt(selection.getEndPosition()),
-        },
-      },
+    // 🔒 Respect role (no change)
+    editor.updateOptions({
+      readOnly: role !== "owner",
     });
-  }
 
-  function renderRemoteCursors() {
-    const editor = editorRef.current;
-    const decorations = decorationsRef.current;
-    if (!editor || !decorations) return;
+    // ✅ APPLY INITIAL SYNC IF IT ALREADY ARRIVED
+    if (pendingInitialSyncRef.current && ytextRef.current) {
+      applyingRemoteRef.current = true;
+      editor.getModel()?.setValue(
+        ytextRef.current.toString()
+      );
+      applyingRemoteRef.current = false;
+      pendingInitialSyncRef.current = false;
+    }
 
-    const model = editor.getModel();
-    if (!model) return;
+    // ✅ Local edits → Yjs (no change)
+    editor.onDidChangeModelContent((e) => {
+      if (applyingRemoteRef.current) return;
+      if (role !== "owner") return;
 
-    const next: monaco.editor.IModelDeltaDecoration[] = [];
+      const model = editor.getModel();
+      const ytext = ytextRef.current;
+      if (!model || !ytext) return;
 
-    awarenessRef.current.forEach(({ cursor, name }) => {
-      const start = model.getPositionAt(cursor.start);
-      const end = model.getPositionAt(cursor.end);
+      e.changes.forEach((c) => {
+        const index = model.getOffsetAt({
+          lineNumber: c.range.startLineNumber,
+          column: c.range.startColumn,
+        });
 
-      next.push({
-        range: {
-          startLineNumber: start.lineNumber,
-          startColumn: start.column,
-          endLineNumber: end.lineNumber,
-          endColumn: end.column,
-        },
-        options: {
-          className: "remote-selection",
-          hoverMessage: { value: name },
-        },
+        if (c.rangeLength > 0) {
+          ytext.delete(index, c.rangeLength);
+        }
+
+        if (c.text) {
+          ytext.insert(index, c.text);
+        }
       });
     });
-
-    decorations.set(next);
   }
 
   /* ---------------------------------- */
-  /* Rooms & undo */
+  /* Room join */
   /* ---------------------------------- */
 
-  function joinRoom(
-    roomId: string,
-    mode: "edit" | "read" = "edit"
-  ) {
-    if (joinedRoomRef.current === roomId) return;
-    if (!userRef.current) return;
+  function joinRoom(roomId: string) {
+    if (!wsRef.current || !userRef.current) return;
+    if (joinedRoomRef.current) return;
 
     joinedRoomRef.current = roomId;
 
-    safeSend({
-      type: "join",
-      roomId,
-      userId: userRef.current.id,
-      mode,
-    });
+    wsRef.current.send(
+      JSON.stringify({
+        type: "join",
+        roomId,
+        userId: userRef.current.id,
+      })
+    );
   }
 
-  function undo() {
-    if (roleRef.current === "viewer") return;
-    if (!userRef.current) return;
+  /* ---------------------------------- */
+  /* Undo / Redo (CLIENT SIDE ✅) */
+  /* ---------------------------------- */
 
-    safeSend({
-      type: "undo",
-      userId: userRef.current.id,
-    });
+  function undo() {
+    if (role !== "owner") return;
+    undoManagerRef.current?.undo();
   }
 
   function redo() {
-    if (roleRef.current === "viewer") return;
-    if (!userRef.current) return;
-
-    safeSend({
-      type: "redo",
-      userId: userRef.current.id,
-    });
+    if (role !== "owner") return;
+    undoManagerRef.current?.redo();
   }
 
-  return { onEditorMount, undo, redo, joinRoom, role };
+  return {
+    onEditorMount,
+    joinRoom,
+    undo,
+    redo,
+    role,
+    isConnected,
+  };
 }

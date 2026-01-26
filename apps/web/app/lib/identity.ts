@@ -5,8 +5,13 @@ export type UserIdentity = {
 };
 
 export function getUserIdentity(): UserIdentity {
+  // ✅ SSR-safe: NEVER throw
   if (typeof window === "undefined") {
-    throw new Error("Client only");
+    return {
+      id: "ssr",
+      name: "ssr",
+      color: "transparent",
+    };
   }
 
   let id = localStorage.getItem("collab:user:id");
@@ -19,7 +24,7 @@ export function getUserIdentity(): UserIdentity {
   }
 
   if (!name) {
-    name = prompt("Enter your name") || "Anonymous";
+    name = `user-${id.slice(0, 4)}`;
     localStorage.setItem("collab:user:name", name);
   }
 
